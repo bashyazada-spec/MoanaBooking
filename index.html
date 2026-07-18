@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Schedule Console — Ana Cole English</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+
+<!-- ============ GATE OVERLAY ============ -->
+<div class="gate-overlay" id="gateOverlay">
+  <div class="gate-modal">
+    <h2>Teacher Dashboard</h2>
+    <p style="color:var(--ink-dim);font-size:.9rem;margin:0 0 10px 0;">Please authenticate to access the calendar scheduling system.</p>
+    <input type="password" id="adminPassInput" placeholder="••••••••" onkeydown="if(event.key==='Enter')tryAdminLogin()">
+    <button class="btn btn-primary" style="width:100%; justify-content:center;" onclick="tryAdminLogin()">Verify Password</button>
+    <div id="adminLoginError" style="color:red;font-family:var(--font-mono);font-size:.78rem;margin-top:12px;min-height:1.2em;"></div>
+    <div style="color:var(--ink-faint);font-size:.76rem;margin-top:24px;border-top:1px dashed var(--border);padding-top:16px;">
+      Prototype Access Password: <code class="inline">teacher2026</code>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PROTECTED CONTENT ============ -->
+<header class="site">
+  <div class="site-nav">
+    <div class="brand"><span class="dot"></span>Ana Cole Dashboard</div>
+    <div class="mono" style="font-size: 0.85rem; color: var(--ink-dim);">Schedule Control Console</div>
+  </div>
+</header>
+
+<main class="wrap" id="dashboardContent" style="display:none; min-height:80vh;">
+  <div class="admin-top">
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <h2 style="margin:0;">Interactive Schedule</h2>
+      <p style="margin:0; font-size:.88rem; color:var(--ink-faint);">Click on any active calendar day to manage bookings or register new lessons.</p>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="adminLogout()">Log out</button>
+  </div>
+
+  <div class="sync-panel">
+    <div>
+      <div class="booker-step-label" style="margin-bottom:6px;">Google Calendar sync</div>
+      <p>Awaiting Cloud Connector pipeline. When wired to production databases, changes trigger backend push actions directly to the API handler.</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span class="mono" style="font-size:.78rem;color:var(--ink-faint);">Offline</span>
+      <div class="toggle"></div>
+      <button class="btn btn-ghost btn-sm" disabled>Configure Sync</button>
+    </div>
+  </div>
+
+  <div class="cal-head">
+    <button class="btn btn-ghost btn-sm" onclick="changeMonth(-1)">← Prev Month</button>
+    <h3 id="calMonthLabel" style="margin:0;"></h3>
+    <button class="btn btn-ghost btn-sm" onclick="changeMonth(1)">Next Month →</button>
+  </div>
+  <div class="cal-grid" id="calDowRow"></div>
+  <div class="cal-grid" id="calGrid" style="margin-top:6px;"></div>
+</main>
+
+<!-- ============ DUAL-ACTION DATE MODAL ============ -->
+<div class="modal-backdrop" id="dayModal" onclick="if(event.target===this)closeDayModal()">
+  <div class="modal-box">
+    <button class="modal-close-btn" onclick="closeDayModal()">✕</button>
+    <div class="modal-header">
+      <h2 id="modalDateTitle" style="margin:0;">Date Details</h2>
+      <span class="mono" id="modalDateSubtitle" style="font-size:.8rem; color:var(--ink-faint);">YYYY-MM-DD</span>
+    </div>
+
+    <div class="modal-body">
+      <div>
+        <div class="booker-step-label">Scheduled Bookings</div>
+        <div id="modalBookingsList" style="max-height:450px; overflow-y:auto; padding-right:4px;"></div>
+      </div>
+
+      <div style="border-left:1px dashed var(--border); padding-left: 14px;" id="modalFormContainer">
+        <div class="booker-step-label">Schedule New Lesson</div>
+        
+        <div class="form-group">
+          <label>Student Name</label>
+          <input type="text" id="manualName" placeholder="e.g. Marie Curie">
+        </div>
+        
+        <div class="form-group">
+          <label>Email Address</label>
+          <input type="email" id="manualEmail" placeholder="marie@domain.com">
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="form-group">
+            <label>Time Slot</label>
+            <input type="time" id="manualTime" value="10:00">
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select id="manualStatus">
+              <option value="approved">Approved</option>
+              <option value="pending">Pending Hold</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Lesson Type</label>
+          <select id="manualService">
+            <option value="convo">Conversation Confidence (45 min)</option>
+            <option value="business">Business English Intensive (60 min)</option>
+            <option value="exam">Exam Prep (IELTS / TOEFL) (60 min)</option>
+            <option value="trial">Starter Trial Lesson (25 min)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Private Notes (Optional)</label>
+          <textarea id="manualNotes" placeholder="Context details..."></textarea>
+        </div>
+
+        <button class="btn btn-primary" style="width:100%; margin-top:8px; justify-content:center;" onclick="submitManualBooking()">
+          Save Booking to Calendar
+        </button>
+        <div id="manualStatusMsg" style="margin-top:12px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer class="site">Ana Cole English · Live Management Console</footer>
+
+<!-- Import modular JavaScript -->
+<script type="module" src="dashboard.js"></script>
+</body>
+</html>
