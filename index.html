@@ -3,40 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Schedule Console — Moana Marie English</title>
+  <title>Schedule Console — Ana Cole English</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="dashboard.css">
   
+  <!-- Direct verification check before rendering the body elements -->
+  <script>
+    if (localStorage.getItem("admin_authed") !== "true") {
+      window.location.replace("login.html");
+    }
+  </script>
+
   <!-- Load the Google Identity Services client library -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
-<!-- ============ AUTHENTICATION GATEWAY ============ -->
-<div class="gate-overlay" id="gateOverlay">
-  <div class="gate-modal">
-    <h2>Teacher Dashboard</h2>
-    <p style="color:var(--ink-dim);font-size:.9rem;margin:0 0 10px 0;">Please authenticate to access the calendar scheduling system.</p>
-    <input type="password" id="adminPassInput" placeholder="••••••••" onkeydown="if(event.key==='Enter')tryAdminLogin()">
-    <button class="btn btn-primary" style="width:100%; justify-content:center;" onclick="tryAdminLogin()">Verify Password</button>
-    <div id="adminLoginError" style="color:red;font-family:var(--font-mono);font-size:.78rem;margin-top:12px;min-height:1.2em;"></div>
-    <div style="color:var(--ink-faint);font-size:.76rem;margin-top:24px;border-top:1px dashed var(--border);padding-top:16px;">
-      Prototype Access Password: <code class="inline">teacher2026</code>
-    </div>
-  </div>
-</div>
-
 <!-- ============ CONSOLE HEADER ============ -->
 <header class="site">
   <div class="site-nav">
-    <div class="brand"><span class="dot"></span>Moana Marie Dashboard</div>
+    <div class="brand"><span class="dot"></span>Ana Cole Dashboard</div>
     <div class="mono" style="font-size: 0.85rem; color: var(--ink-dim);">Schedule Control Console</div>
   </div>
 </header>
 
 <!-- ============ MAIN CONSOLE BODY ============ -->
-<main class="wrap" id="dashboardContent" style="display:none; min-height:80vh;">
+<main class="wrap" id="dashboardContent" style="display:block; min-height:80vh;">
   <div class="admin-top">
     <div style="display:flex; flex-direction:column; gap:4px;">
       <h2 style="margin:0;">Interactive Schedule</h2>
@@ -135,7 +128,7 @@
   </div>
 </div>
 
-<footer class="site">Moana Marie English · Live Management Console</footer>
+<footer class="site">Ana Cole English · Live Management Console</footer>
 
 <script type="module" src="dashboard.js"></script>
 </body>
