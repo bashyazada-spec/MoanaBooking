@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 /* ======================================================================
    FIREBASE & GOOGLE CONFIGURATION
@@ -27,10 +27,13 @@ const SERVICES = {
   exam: { name: 'Exam Prep (IELTS / TOEFL)', duration: 60 }
 };
 
+const ADMIN_PASSWORD = "teacher2026";
+
 /* ======================================================================
    DATA CORE
    ====================================================================== */
 const DB = {
+  // Bookings list operations
   async listBookings() {
     try {
       const q = query(collection(db, "bookings"), orderBy("date"), orderBy("time"));
@@ -64,6 +67,39 @@ const DB = {
     } catch (e) {
       console.error("Firebase update failed: ", e);
     }
+  },
+
+  // Regular Students Directory operations
+  async listStudents() {
+    try {
+      const q = query(collection(db, "students"), orderBy("name"));
+      const querySnapshot = await getDocs(q);
+      const out = [];
+      querySnapshot.forEach((doc) => {
+        out.push({ id: doc.id, ...doc.data() });
+      });
+      return out;
+    } catch (e) {
+      console.error("Firebase fetch students failed: ", e);
+      return [];
+    }
+  },
+  async addStudent(student) {
+    try {
+      const ref = await addDoc(collection(db, "students"), student);
+      return { id: ref.id, ...student };
+    } catch (e) {
+      console.error("Firebase write student failed: ", e);
+      throw e;
+    }
+  },
+  async deleteStudent(id) {
+    try {
+      const studentRef = doc(db, "students", id);
+      await deleteDoc(studentRef);
+    } catch (e) {
+      console.error("Firebase delete student failed: ", e);
+    }
   }
 };
 
@@ -75,6 +111,7 @@ let state = {
   selectedDay: null,
   bookingsCache: [],
   googleEventsCache: [], 
+  studentsCache: [], // Cache for regular students directory list
   googleAccessToken: sessionStorage.getItem("google_token") || null,
   tokenClient: null
 };
@@ -157,7 +194,6 @@ function updateGoogleUI(connected) {
   }
 }
 
-// Maps date & time variables to strict ISO-8601 formatting with local timezone offsets
 function buildISOString(dateStr, timeStr, addMinutes = 0) {
   const dt = new Date(`${dateStr}T${timeStr}:00`);
   if (addMinutes > 0) {
@@ -177,7 +213,6 @@ function buildISOString(dateStr, timeStr, addMinutes = 0) {
     ':' + pad(tzo % 60);
 }
 
-// FETCH events from Google Calendar API
 async function fetchGoogleCalendarEvents() {
   if (!state.googleAccessToken) return [];
 
@@ -209,7 +244,6 @@ async function fetchGoogleCalendarEvents() {
   return [];
 }
 
-// PUSH event to Google Calendar API
 async function writeEventToGoogleCalendar(booking) {
   if (!state.googleAccessToken) return;
 
@@ -250,10 +284,99 @@ async function writeEventToGoogleCalendar(booking) {
 }
 
 /* ======================================================================
+   REGULAR STUDENTS DIRECTORY LOGIC
+   ====================================================================== */
+async function refreshStudentsDirectory() {
+  state.studentsCache = await DB.listStudents();
+  renderStudentsDirectory();
+  renderModalDropdown();
+}
+
+function renderStudentsDirectory() {
+  const container = document.getElementById("regularStudentsDirectoryList");
+  if (state.studentsCache.length === 0) {
+    container.innerHTML = `<span style="font-size:0.8rem; color:var(--ink-faint); padding: 8px 0; display:block;">Directory is empty. Add a student below.</span>`;
+    return;
+  }
+
+  container.innerHTML = state.studentsCache.map(s => `
+    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-card-light); padding:5px 10px; border-radius:6px; border:1px solid rgba(17,17,17,0.06); font-size:0.82rem;">
+      <span style="font-weight:600; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; max-width:180px;" title="${esc(s.name)} (${esc(s.email)})">
+        ${esc(s.name)} <span style="font-weight:400; font-family:var(--font-mono); color:var(--ink-faint); font-size:0.75rem;">(${esc(s.email)})</span>
+      </span>
+      <button onclick="deleteDirectoryStudent('${s.id}')" style="background:none; border:none; color:red; cursor:pointer; font-size:0.82rem; font-weight:bold; margin-left:8px;">✕</button>
+    </div>
+  `).join('');
+}
+
+function renderModalDropdown() {
+  const select = document.getElementById("manualRegularSelect");
+  
+  // Keep original default option
+  select.innerHTML = `<option value="">-- Select Saved Student --</option>`;
+  
+  state.studentsCache.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = `${s.name} (${s.email})`;
+    select.appendChild(opt);
+  });
+}
+
+async function addDirectoryStudent() {
+  const nameInput = document.getElementById("dirStudentName");
+  const emailInput = document.getElementById("dirStudentEmail");
+  const statusMsg = document.getElementById("dirStatusMsg");
+
+  statusMsg.innerHTML = '';
+  const name = nameInput.value.trim();
+  const email = emailInput.value.trim();
+
+  if (!name || !email) {
+    statusMsg.textContent = "Please fill out both Name and Email.";
+    return;
+  }
+
+  try {
+    await DB.addStudent({ name, email });
+    nameInput.value = '';
+    emailInput.value = '';
+    await refreshStudentsDirectory();
+  } catch (err) {
+    statusMsg.textContent = "Failed to add student directory card.";
+  }
+}
+
+async function deleteDirectoryStudent(id) {
+  if (confirm("Are you sure you want to remove this student from your directory?")) {
+    await DB.deleteStudent(id);
+    await refreshStudentsDirectory();
+  }
+}
+
+function autoFillRegularStudent(studentId) {
+  const nameInput = document.getElementById("manualName");
+  const emailInput = document.getElementById("manualEmail");
+
+  if (!studentId) {
+    nameInput.value = '';
+    emailInput.value = '';
+    return;
+  }
+
+  const student = state.studentsCache.find(s => s.id === studentId);
+  if (student) {
+    nameInput.value = student.name;
+    emailInput.value = student.email;
+  }
+}
+
+/* ======================================================================
    CALENDAR GENERATOR & INTEGRATED RENDERING
    ====================================================================== */
 async function initDashboard() {
   await refreshCalendarView();
+  await refreshStudentsDirectory();
   initGoogleAuthClient();
 }
 
@@ -356,6 +479,7 @@ function openDayModal(iso) {
   document.getElementById('manualEmail').value = '';
   document.getElementById('manualNotes').value = '';
   document.getElementById('manualStatusMsg').innerHTML = '';
+  document.getElementById("manualRegularSelect").value = ''; // Reset dropdown selection
 
   renderModalBookings();
   document.getElementById('dayModal').style.display = 'flex';
@@ -472,6 +596,7 @@ async function submitManualBooking() {
     document.getElementById('manualName').value = '';
     document.getElementById('manualEmail').value = '';
     document.getElementById('manualNotes').value = '';
+    document.getElementById("manualRegularSelect").value = '';
 
     if (status === "approved") {
       await writeEventToGoogleCalendar(newBooking);
@@ -494,6 +619,11 @@ window.closeDayModal = closeDayModal;
 window.changeStatus = changeStatus;
 window.submitManualBooking = submitManualBooking;
 window.requestGoogleAuth = requestGoogleAuth;
+
+// Directory bindings
+window.addDirectoryStudent = addDirectoryStudent;
+window.deleteDirectoryStudent = deleteDirectoryStudent;
+window.autoFillRegularStudent = autoFillRegularStudent;
 
 // Auto-trigger load once page mounts and passes the check
 initDashboard();
