@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Teacher Console Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #EAF6FC;
+      --bg-card: #FFFFFF;
+      --bg-card-light: #DDEFFA;
+      --ink: #111111;
+      --ink-dim: #4A4A4A;
+      --ink-faint: #767676;
+      --yellow: #7EC8E3;
+      --border: rgba(17,17,17,0.14);
+      --border-strong: rgba(17,17,17,0.32);
+      --font-display: 'Fraunces', serif;
+      --font-body: 'IBM Plex Sans', sans-serif;
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--font-body);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .login-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+      max-width: 400px;
+      width: 100%;
+      padding: 40px 32px;
+      text-align: center;
+    }
+    h2 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      margin: 0 0 8px 0;
+      font-size: 1.8rem;
+    }
+    p {
+      color: var(--ink-dim);
+      font-size: 0.9rem;
+      margin: 0 0 24px 0;
+      line-height: 1.45;
+    }
+    input {
+      width: 100%;
+      text-align: center;
+      margin: 0 0 16px 0;
+      font-size: 1.1rem;
+      letter-spacing: 0.12em;
+      background: var(--bg-card-light);
+      border: 1px solid var(--border-strong);
+      color: var(--ink);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    input:focus {
+      outline: 2px solid var(--yellow);
+      outline-offset: 1px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      padding: 13px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      border: 1px solid transparent;
+      background: var(--yellow);
+      color: #111111;
+      cursor: pointer;
+      transition: transform 0.12s ease;
+    }
+    .btn:active {
+      transform: scale(0.98);
+    }
+    .error-msg {
+      color: red;
+      font-size: 0.8rem;
+      margin-top: 12px;
+      min-height: 1.2em;
+    }
+  </style>
+</head>
+<body>
+
+<div class="login-box">
+  <h2>Teacher Dashboard</h2>
+  <p>Please authenticate to access calendar scheduling and student lists.</p>
+  
+  <input type="password" id="passInput" placeholder="••••••••" onkeydown="if(event.key==='Enter')verifyPassword()">
+  <button class="btn" onclick="verifyPassword()">Verify Password</button>
+  <div id="loginError" class="error-msg"></div>
+</div>
+
+<script>
+  // Security Gate check: If already logged in, skip the login screen entirely
+  if (localStorage.getItem("admin_authed") === "true") {
+    window.location.replace("index.html");
+  }
+
+  function verifyPassword() {
+    const val = document.getElementById("passInput").value;
+    const err = document.getElementById("loginError");
+    
+    // Updated secure console passkey
+    if (val === "bebekonapogi") {
+      localStorage.setItem("admin_authed", "true");
+      window.location.replace("index.html");
+    } else {
+      err.textContent = "Incorrect password. Access denied.";
+    }
+  }
+</script>
+</body>
+</html>
