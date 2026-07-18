@@ -77,8 +77,8 @@ let state = {
   calMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   selectedDay: null,
   bookingsCache: [],
-  googleEventsCache: [], // Holds active personal/external calendar events
-  googleAccessToken: null,
+  googleEventsCache: [], 
+  googleAccessToken: sessionStorage.getItem("google_token") || null,
   tokenClient: null
 };
 
@@ -107,6 +107,8 @@ function tryAdminLogin() {
 
 function adminLogout() {
   state.adminAuthed = false;
+  sessionStorage.removeItem("google_token");
+  state.googleAccessToken = null;
   document.getElementById('gateOverlay').style.display = 'flex';
   document.getElementById('dashboardContent').style.display = 'none';
   document.getElementById('adminPassInput').value = '';
@@ -130,10 +132,16 @@ function initGoogleAuthClient() {
         return;
       }
       state.googleAccessToken = tokenResponse.access_token;
+      sessionStorage.setItem("google_token", tokenResponse.access_token);
       updateGoogleUI(true);
       await refreshCalendarView();
     },
   });
+
+  // If a token was already saved in this session, restore the UI state automatically
+  if (state.googleAccessToken) {
+    updateGoogleUI(true);
+  }
 }
 
 function requestGoogleAuth() {
@@ -169,7 +177,7 @@ function updateGoogleUI(connected) {
   }
 }
 
-// Maps date & time variables to strict ISO-8601 formatting with client timezone offsets
+// Maps date & time variables to strict ISO-8601 formatting with local timezone offsets
 function buildISOString(dateStr, timeStr, addMinutes = 0) {
   const dt = new Date(`${dateStr}T${timeStr}:00`);
   if (addMinutes > 0) {
@@ -189,16 +197,16 @@ function buildISOString(dateStr, timeStr, addMinutes = 0) {
     ':' + pad(tzo % 60);
 }
 
-// FETCH events from Google Calendar API inside current visible month
+// FETCH events from Google Calendar API
 async function fetchGoogleCalendarEvents() {
   if (!state.googleAccessToken) return [];
 
   const year = state.calMonth.getFullYear();
   const month = state.calMonth.getMonth();
   
-  // Calculate boundaries for visible month API query window
-  const timeMin = new Date(year, month, 1).toISOString();
-  const timeMax = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
+  // Widen the query dates slightly (7-day buffer) to absorb timezone edge overlaps
+  const timeMin = new Date(year, month, 1 - 7).toISOString();
+  const timeMax = new Date(year, month + 1, 0 + 7, 23, 59, 59).toISOString();
 
   const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=true&orderBy=startTime`;
 
@@ -211,6 +219,11 @@ async function fetchGoogleCalendarEvents() {
     if (response.ok) {
       const data = await response.json();
       return data.items || [];
+    } else if (response.status === 401) {
+      // Handle expired session token
+      sessionStorage.removeItem("google_token");
+      state.googleAccessToken = null;
+      updateGoogleUI(false);
     }
   } catch (err) {
     console.error("Failed to fetch Google Calendar entries: ", err);
@@ -280,13 +293,22 @@ async function refreshCalendarView() {
   if (state.googleAccessToken) {
     const rawGoogleEvents = await fetchGoogleCalendarEvents();
     
-    // Normalize and filter Google events to identify non-system entries
+    // Normalize and filter Google events using local clock timezone structures
     state.googleEventsCache = rawGoogleEvents.map(evt => {
       if (!evt.start || !evt.start.dateTime) return null;
       
       const startDt = new Date(evt.start.dateTime);
-      const dateStr = startDt.toISOString().slice(0, 10);
-      const timeStr = startDt.toTimeString().slice(0, 5);
+      
+      // Build local year-month-day string directly (avoids UTC timezone shift)
+      const yr = startDt.getFullYear();
+      const mo = String(startDt.getMonth() + 1).padStart(2, '0');
+      const dy = String(startDt.getDate()).padStart(2, '0');
+      const dateStr = `${yr}-${mo}-${dy}`;
+
+      // Build local hour-minute string
+      const hr = String(startDt.getHours()).padStart(2, '0');
+      const mi = String(startDt.getMinutes()).padStart(2, '0');
+      const timeStr = `${hr}:${mi}`;
 
       return {
         id: evt.id,
@@ -298,7 +320,7 @@ async function refreshCalendarView() {
       };
     }).filter(evt => {
       if (!evt) return false;
-      // Filter out events created by our app to prevent duplicate rendering
+      // Filter out system duplicates
       const isSystemEvent = state.bookingsCache.some(b => b.date === evt.date && b.time === evt.time);
       return !isSystemEvent;
     });
@@ -319,17 +341,14 @@ function renderCalendarGrid() {
   const firstDow = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  // Map out days for dot indexing
   const dotsByDate = {};
   
-  // Append Firestore dots
   state.bookingsCache.forEach(b => {
     if (b.status === 'pending' || b.status === 'approved') {
       (dotsByDate[b.date] = dotsByDate[b.date] || []).push(b.status);
     }
   });
 
-  // Append Google external busy dots
   state.googleEventsCache.forEach(evt => {
     (dotsByDate[evt.date] = dotsByDate[evt.date] || []).push("google");
   });
@@ -378,7 +397,6 @@ function closeDayModal() {
 function renderModalBookings() {
   const container = document.getElementById('modalBookingsList');
   
-  // Fetch system bookings & external Google bookings for this day
   const systemBookings = state.bookingsCache.filter(b => b.date === state.selectedDay);
   const googleBookings = state.googleEventsCache.filter(evt => evt.date === state.selectedDay);
 
@@ -389,7 +407,6 @@ function renderModalBookings() {
 
   let htmlMarkup = "";
 
-  // 1. Render system bookings (active controls)
   if (systemBookings.length > 0) {
     htmlMarkup += systemBookings.map(b => `
       <div class="booking-row" style="flex-direction:column; align-items:stretch; gap:10px;">
@@ -415,7 +432,6 @@ function renderModalBookings() {
     `).join('');
   }
 
-  // 2. Render Google Calendar external busy slots (read-only)
   if (googleBookings.length > 0) {
     htmlMarkup += googleBookings.map(b => `
       <div class="booking-row" style="border: 1px dashed var(--border-strong); background: rgba(17,17,17,0.02);">
