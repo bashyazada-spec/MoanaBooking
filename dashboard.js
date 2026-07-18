@@ -1,6 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
+/* ======================================================================
+   FIREBASE & GOOGLE CONFIGURATION
+   ====================================================================== */
 const firebaseConfig = {
   apiKey: "AIzaSyD8TbWSzhb81AoHoJof5nWkKvgfmdixgnE",
   authDomain: "moana-booking-16deb.firebaseapp.com",
@@ -11,18 +14,24 @@ const firebaseConfig = {
   measurementId: "G-2FY2HV8XEC"
 };
 
+const GOOGLE_CLIENT_ID = "704621846391-psbnhrrnoqgnpsvvn2g091mjit276p6c.apps.googleusercontent.com";
+const GOOGLE_API_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 const SERVICES = {
-  trial: 'Starter Trial Lesson',
-  convo: 'Conversation Confidence',
-  business: 'Business English Intensive',
-  exam: 'Exam Prep (IELTS / TOEFL)'
+  trial: { name: 'Starter Trial Lesson', duration: 25 },
+  convo: { name: 'Conversation Confidence', duration: 45 },
+  business: { name: 'Business English Intensive', duration: 60 },
+  exam: { name: 'Exam Prep (IELTS / TOEFL)', duration: 60 }
 };
 
 const ADMIN_PASSWORD = "teacher2026";
 
+/* ======================================================================
+   DATA CORE
+   ====================================================================== */
 const DB = {
   async listBookings() {
     try {
@@ -60,11 +69,16 @@ const DB = {
   }
 };
 
+/* ======================================================================
+   SYSTEM CONTROLLER STATE
+   ====================================================================== */
 let state = {
   adminAuthed: false,
   calMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   selectedDay: null,
   bookingsCache: [],
+  googleAccessToken: null,
+  tokenClient: null
 };
 
 function esc(s) { return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -73,6 +87,9 @@ function fmtDate(iso) {
   return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 }
 
+/* ======================================================================
+   AUTHENTICATION LOGIC
+   ====================================================================== */
 function tryAdminLogin() {
   const val = document.getElementById('adminPassInput').value;
   const err = document.getElementById('adminLoginError');
@@ -94,8 +111,137 @@ function adminLogout() {
   document.getElementById('adminPassInput').value = '';
 }
 
+/* ======================================================================
+   GOOGLE CALENDAR SYNC INTELLIGENCE
+   ====================================================================== */
+function initGoogleAuthClient() {
+  if (typeof google === "undefined") {
+    console.warn("Google identity services library not loaded yet.");
+    return;
+  }
+  
+  state.tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: GOOGLE_API_SCOPE,
+    callback: (tokenResponse) => {
+      if (tokenResponse.error !== undefined) {
+        console.error("Google authentication error:", tokenResponse.error);
+        return;
+      }
+      state.googleAccessToken = tokenResponse.access_token;
+      updateGoogleUI(true);
+    },
+  });
+}
+
+function requestGoogleAuth() {
+  if (!state.tokenClient) {
+    initGoogleAuthClient();
+  }
+  if (state.tokenClient) {
+    // Request permission (triggers Google popup window)
+    state.tokenClient.requestAccessToken({ prompt: 'consent' });
+  } else {
+    alert("Authorization library failed to load. Please verify your internet connection.");
+  }
+}
+
+function updateGoogleUI(connected) {
+  const label = document.getElementById("googleSyncStatusLabel");
+  const toggle = document.getElementById("googleSyncToggle");
+  const btn = document.getElementById("googleConnectBtn");
+  const desc = document.getElementById("googleSyncDescription");
+
+  if (connected) {
+    label.textContent = "Online / Connected";
+    label.style.color = "var(--green)";
+    toggle.style.opacity = "1";
+    toggle.style.background = "var(--green)";
+    btn.textContent = "Reconnect Account";
+    desc.innerHTML = `Connected to Google Calendar. Approved bookings will automatically sync to your calendar.`;
+  } else {
+    label.textContent = "Offline";
+    label.style.color = "var(--ink-faint)";
+    toggle.style.opacity = "0.4";
+    toggle.style.background = "var(--bg-card-light)";
+    btn.textContent = "Connect Google Account";
+  }
+}
+
+// Maps date & time variables to strict ISO-8601 formatting with client timezone offsets
+function buildISOString(dateStr, timeStr, addMinutes = 0) {
+  const dt = new Date(`${dateStr}T${timeStr}:00`);
+  if (addMinutes > 0) {
+    dt.setMinutes(dt.getMinutes() + addMinutes);
+  }
+  const tzo = -dt.getTimezoneOffset();
+  const dif = tzo >= 0 ? '+' : '-';
+  const pad = (num) => String(Math.floor(Math.abs(num))).padStart(2, '0');
+  
+  return dt.getFullYear() +
+    '-' + pad(dt.getMonth() + 1) +
+    '-' + pad(dt.getDate()) +
+    'T' + pad(dt.getHours()) +
+    ':' + pad(dt.getMinutes()) +
+    ':' + pad(dt.getSeconds()) +
+    dif + pad(tzo / 60) +
+    ':' + pad(tzo % 60);
+}
+
+// Sends a POST request directly to the Google Calendar V3 API endpoint
+async function writeEventToGoogleCalendar(booking) {
+  if (!state.googleAccessToken) {
+    console.log("Skipping Google Sync: Not authenticated with Google.");
+    return;
+  }
+
+  const durationObj = SERVICES[booking.serviceId] || { name: booking.serviceName, duration: 45 };
+  const startTime = buildISOString(booking.date, booking.time, 0);
+  const endTime = buildISOString(booking.date, booking.time, durationObj.duration);
+
+  const eventPayload = {
+    summary: `${booking.name} — ${durationObj.name}`,
+    description: `Lesson format: ${durationObj.name}\nClient Email: ${booking.email}\nNotes: ${booking.notes || 'None'}`,
+    start: {
+      dateTime: startTime,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    },
+    end: {
+      dateTime: endTime,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    },
+    attendees: [
+      { email: booking.email }
+    ]
+  };
+
+  try {
+    const response = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${state.googleAccessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(eventPayload)
+    });
+
+    if (response.ok) {
+      console.log("Successfully pushed event to Google Calendar.");
+    } else {
+      const errRes = await response.json();
+      console.error("Google Calendar API error responses:", errRes);
+    }
+  } catch (err) {
+    console.error("Network failure trying to contact Google Calendar APIs:", err);
+  }
+}
+
+/* ======================================================================
+   CALENDAR GENERATOR & ACTIONS
+   ====================================================================== */
 async function initDashboard() {
   await refreshCalendarView();
+  initGoogleAuthClient();
 }
 
 function changeMonth(delta) {
@@ -198,6 +344,15 @@ function renderModalBookings() {
 
 async function changeStatus(id, newStatus) {
   await DB.updateBooking(id, { status: newStatus });
+  
+  // If we just approved the booking, try to sync it to Google Calendar
+  if (newStatus === "approved") {
+    const bookingObj = state.bookingsCache.find(b => b.id === id);
+    if (bookingObj) {
+      await writeEventToGoogleCalendar(bookingObj);
+    }
+  }
+
   await refreshCalendarView();
   renderModalBookings();
 }
@@ -219,8 +374,8 @@ async function submitManualBooking() {
   }
 
   try {
-    const serviceName = SERVICES[serviceKey] || 'Custom Lesson';
-    await DB.addBooking({
+    const serviceName = SERVICES[serviceKey] ? SERVICES[serviceKey].name : 'Custom Lesson';
+    const newBooking = await DB.addBooking({
       serviceId: serviceKey,
       serviceName: serviceName,
       date: state.selectedDay,
@@ -237,6 +392,11 @@ async function submitManualBooking() {
     document.getElementById('manualEmail').value = '';
     document.getElementById('manualNotes').value = '';
 
+    // If added as approved, automatically try to push to Google Calendar
+    if (status === "approved") {
+      await writeEventToGoogleCalendar(newBooking);
+    }
+
     await refreshCalendarView();
     renderModalBookings();
   } catch (err) {
@@ -244,7 +404,9 @@ async function submitManualBooking() {
   }
 }
 
-// Bind methods programmatically to global window scope
+/* ======================================================================
+   WINDOW EVENT DISPATCHING (Exposing closures to index.html click routes)
+   ====================================================================== */
 window.tryAdminLogin = tryAdminLogin;
 window.adminLogout = adminLogout;
 window.changeMonth = changeMonth;
@@ -252,3 +414,4 @@ window.openDayModal = openDayModal;
 window.closeDayModal = closeDayModal;
 window.changeStatus = changeStatus;
 window.submitManualBooking = submitManualBooking;
+window.requestGoogleAuth = requestGoogleAuth;
