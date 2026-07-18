@@ -7,10 +7,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="dashboard.css">
+  
+  <!-- Load the Google Identity Services client library -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
-<!-- ============ GATE OVERLAY ============ -->
+<!-- ============ AUTHENTICATION GATEWAY ============ -->
 <div class="gate-overlay" id="gateOverlay">
   <div class="gate-modal">
     <h2>Teacher Dashboard</h2>
@@ -24,7 +27,7 @@
   </div>
 </div>
 
-<!-- ============ PROTECTED CONTENT ============ -->
+<!-- ============ CONSOLE HEADER ============ -->
 <header class="site">
   <div class="site-nav">
     <div class="brand"><span class="dot"></span>Ana Cole Dashboard</div>
@@ -32,6 +35,7 @@
   </div>
 </header>
 
+<!-- ============ MAIN CONSOLE BODY ============ -->
 <main class="wrap" id="dashboardContent" style="display:none; min-height:80vh;">
   <div class="admin-top">
     <div style="display:flex; flex-direction:column; gap:4px;">
@@ -41,15 +45,16 @@
     <button class="btn btn-ghost btn-sm" onclick="adminLogout()">Log out</button>
   </div>
 
+  <!-- Google Calendar Sync Status Panel -->
   <div class="sync-panel">
     <div>
       <div class="booker-step-label" style="margin-bottom:6px;">Google Calendar sync</div>
-      <p>Awaiting Cloud Connector pipeline. When wired to production databases, changes trigger backend push actions directly to the API handler.</p>
+      <p id="googleSyncDescription">Authorize this app with your Google Account. Once connected, approving a booking will automatically place it on your Google Calendar.</p>
     </div>
-    <div style="display:flex;align-items:center;gap:10px;">
-      <span class="mono" style="font-size:.78rem;color:var(--ink-faint);">Offline</span>
-      <div class="toggle"></div>
-      <button class="btn btn-ghost btn-sm" disabled>Configure Sync</button>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <span class="mono" id="googleSyncStatusLabel" style="font-size:.78rem;color:var(--ink-faint);font-weight:600;">Offline</span>
+      <div class="toggle" id="googleSyncToggle" style="opacity: 0.4; transition: opacity 0.3s;"></div>
+      <button class="btn btn-primary btn-sm" id="googleConnectBtn" onclick="requestGoogleAuth()">Connect Google Account</button>
     </div>
   </div>
 
@@ -62,7 +67,7 @@
   <div class="cal-grid" id="calGrid" style="margin-top:6px;"></div>
 </main>
 
-<!-- ============ DUAL-ACTION DATE MODAL ============ -->
+<!-- ============ INTERACTIVE DETAIL & BOOKING MODAL ============ -->
 <div class="modal-backdrop" id="dayModal" onclick="if(event.target===this)closeDayModal()">
   <div class="modal-box">
     <button class="modal-close-btn" onclick="closeDayModal()">✕</button>
@@ -72,11 +77,13 @@
     </div>
 
     <div class="modal-body">
+      <!-- Left side: Existing scheduled bookings list -->
       <div>
         <div class="booker-step-label">Scheduled Bookings</div>
         <div id="modalBookingsList" style="max-height:450px; overflow-y:auto; padding-right:4px;"></div>
       </div>
 
+      <!-- Right side: Manually add a reservation form -->
       <div style="border-left:1px dashed var(--border); padding-left: 14px;" id="modalFormContainer">
         <div class="booker-step-label">Schedule New Lesson</div>
         
@@ -130,7 +137,6 @@
 
 <footer class="site">Ana Cole English · Live Management Console</footer>
 
-<!-- Import modular JavaScript -->
 <script type="module" src="dashboard.js"></script>
 </body>
 </html>
