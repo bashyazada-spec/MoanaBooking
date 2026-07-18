@@ -27,8 +27,6 @@ const SERVICES = {
   exam: { name: 'Exam Prep (IELTS / TOEFL)', duration: 60 }
 };
 
-const ADMIN_PASSWORD = "teacher2026";
-
 /* ======================================================================
    DATA CORE
    ====================================================================== */
@@ -73,7 +71,6 @@ const DB = {
    SYSTEM CONTROLLER STATE
    ====================================================================== */
 let state = {
-  adminAuthed: false,
   calMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   selectedDay: null,
   bookingsCache: [],
@@ -89,29 +86,13 @@ function fmtDate(iso) {
 }
 
 /* ======================================================================
-   AUTHENTICATION LOGIC
+   TERMINATE SESSION (REPLACE REDIRECT)
    ====================================================================== */
-function tryAdminLogin() {
-  const val = document.getElementById('adminPassInput').value;
-  const err = document.getElementById('adminLoginError');
-  if (val === ADMIN_PASSWORD) {
-    state.adminAuthed = true;
-    document.getElementById('gateOverlay').style.display = 'none';
-    document.getElementById('dashboardContent').style.display = 'block';
-    err.textContent = '';
-    initDashboard();
-  } else {
-    err.textContent = 'Incorrect passkey. Please try again.';
-  }
-}
-
 function adminLogout() {
-  state.adminAuthed = false;
+  localStorage.removeItem("admin_authed");
   sessionStorage.removeItem("google_token");
   state.googleAccessToken = null;
-  document.getElementById('gateOverlay').style.display = 'flex';
-  document.getElementById('dashboardContent').style.display = 'none';
-  document.getElementById('adminPassInput').value = '';
+  window.location.replace("login.html");
 }
 
 /* ======================================================================
@@ -138,7 +119,6 @@ function initGoogleAuthClient() {
     },
   });
 
-  // If a token was already saved in this session, restore the UI state automatically
   if (state.googleAccessToken) {
     updateGoogleUI(true);
   }
@@ -204,7 +184,6 @@ async function fetchGoogleCalendarEvents() {
   const year = state.calMonth.getFullYear();
   const month = state.calMonth.getMonth();
   
-  // Widen the query dates slightly (7-day buffer) to absorb timezone edge overlaps
   const timeMin = new Date(year, month, 1 - 7).toISOString();
   const timeMax = new Date(year, month + 1, 0 + 7, 23, 59, 59).toISOString();
 
@@ -220,7 +199,6 @@ async function fetchGoogleCalendarEvents() {
       const data = await response.json();
       return data.items || [];
     } else if (response.status === 401) {
-      // Handle expired session token
       sessionStorage.removeItem("google_token");
       state.googleAccessToken = null;
       updateGoogleUI(false);
@@ -286,26 +264,21 @@ function changeMonth(delta) {
 }
 
 async function refreshCalendarView() {
-  // 1. Fetch from Firestore
   state.bookingsCache = await DB.listBookings();
   
-  // 2. Fetch from Google Calendar if logged in
   if (state.googleAccessToken) {
     const rawGoogleEvents = await fetchGoogleCalendarEvents();
     
-    // Normalize and filter Google events using local clock timezone structures
     state.googleEventsCache = rawGoogleEvents.map(evt => {
       if (!evt.start || !evt.start.dateTime) return null;
       
       const startDt = new Date(evt.start.dateTime);
       
-      // Build local year-month-day string directly (avoids UTC timezone shift)
       const yr = startDt.getFullYear();
       const mo = String(startDt.getMonth() + 1).padStart(2, '0');
       const dy = String(startDt.getDate()).padStart(2, '0');
       const dateStr = `${yr}-${mo}-${dy}`;
 
-      // Build local hour-minute string
       const hr = String(startDt.getHours()).padStart(2, '0');
       const mi = String(startDt.getMinutes()).padStart(2, '0');
       const timeStr = `${hr}:${mi}`;
@@ -320,7 +293,6 @@ async function refreshCalendarView() {
       };
     }).filter(evt => {
       if (!evt) return false;
-      // Filter out system duplicates
       const isSystemEvent = state.bookingsCache.some(b => b.date === evt.date && b.time === evt.time);
       return !isSystemEvent;
     });
@@ -515,7 +487,6 @@ async function submitManualBooking() {
 /* ======================================================================
    WINDOW EVENT DISPATCHING (Exposing closures to index.html click routes)
    ====================================================================== */
-window.tryAdminLogin = tryAdminLogin;
 window.adminLogout = adminLogout;
 window.changeMonth = changeMonth;
 window.openDayModal = openDayModal;
@@ -523,3 +494,6 @@ window.closeDayModal = closeDayModal;
 window.changeStatus = changeStatus;
 window.submitManualBooking = submitManualBooking;
 window.requestGoogleAuth = requestGoogleAuth;
+
+// Auto-trigger load once page mounts and passes the check
+initDashboard();
