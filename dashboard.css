@@ -43,10 +43,11 @@ header.site{position:sticky;top:0;z-index:40;background:rgba(234,246,252,0.92);b
 .booking-row{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:10px;width:100%;}
 .booking-row .info b{font-size:.98rem;}
 .booking-row .meta-line{color:var(--ink-faint);font-family:var(--font-mono);font-size:.78rem;margin-top:4px;}
-.badge{font-family:var(--font-mono);font-size:.72rem;padding:3px 9px;border-radius:999px;text-transform:uppercase;letter-spacing:.05em;}
+.badge{font-family:var(--font-mono);font-size:.72rem;padding:3px 9px;border-radius:999px;text-transform:uppercase;letter-spacing:0.05em;}
 .badge.pending{background:rgba(126,200,227,.28);color:#0e6d94;}
 .badge.approved{background:rgba(201,162,39,.22);color:#8a6f10;}
 .badge.declined{background:rgba(17,17,17,.10);color:#111111;}
+.badge.google{background:rgba(17,17,17,0.08);color:var(--ink-dim);border:1px solid rgba(17,17,17,0.15);}
 .empty-state{color:var(--ink-faint);font-family:var(--font-mono);font-size:.85rem;padding:30px;text-align:center;border:1px dashed var(--border);border-radius:10px;width:100%;}
 
 .booker-step-label{font-family:var(--font-mono);font-size:.76rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-faint);margin-bottom:12px;}
@@ -62,6 +63,7 @@ header.site{position:sticky;top:0;z-index:40;background:rgba(234,246,252,0.92);b
 .cal-dot{width:7px;height:7px;border-radius:50%;}
 .cal-dot.pending{background:var(--yellow);}
 .cal-dot.approved{background:var(--green);}
+.cal-dot.google{background:var(--ink-faint);}
 
 .sync-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:30px;display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;}
 .sync-panel p{color:var(--ink-dim);font-size:.88rem;max-width:520px;margin:6px 0 0;}
