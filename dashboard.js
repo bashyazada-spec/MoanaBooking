@@ -77,6 +77,7 @@ let state = {
   calMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   selectedDay: null,
   bookingsCache: [],
+  googleEventsCache: [], // Holds active personal/external calendar events
   googleAccessToken: null,
   tokenClient: null
 };
@@ -123,13 +124,14 @@ function initGoogleAuthClient() {
   state.tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: GOOGLE_CLIENT_ID,
     scope: GOOGLE_API_SCOPE,
-    callback: (tokenResponse) => {
+    callback: async (tokenResponse) => {
       if (tokenResponse.error !== undefined) {
         console.error("Google authentication error:", tokenResponse.error);
         return;
       }
       state.googleAccessToken = tokenResponse.access_token;
       updateGoogleUI(true);
+      await refreshCalendarView();
     },
   });
 }
@@ -139,7 +141,6 @@ function requestGoogleAuth() {
     initGoogleAuthClient();
   }
   if (state.tokenClient) {
-    // Request permission (triggers Google popup window)
     state.tokenClient.requestAccessToken({ prompt: 'consent' });
   } else {
     alert("Authorization library failed to load. Please verify your internet connection.");
@@ -158,7 +159,7 @@ function updateGoogleUI(connected) {
     toggle.style.opacity = "1";
     toggle.style.background = "var(--green)";
     btn.textContent = "Reconnect Account";
-    desc.innerHTML = `Connected to Google Calendar. Approved bookings will automatically sync to your calendar.`;
+    desc.innerHTML = `Connected to Google Calendar. Personal calendar events and conflicts are synced to your grid automatically.`;
   } else {
     label.textContent = "Offline";
     label.style.color = "var(--ink-faint)";
@@ -188,12 +189,38 @@ function buildISOString(dateStr, timeStr, addMinutes = 0) {
     ':' + pad(tzo % 60);
 }
 
-// Sends a POST request directly to the Google Calendar V3 API endpoint
-async function writeEventToGoogleCalendar(booking) {
-  if (!state.googleAccessToken) {
-    console.log("Skipping Google Sync: Not authenticated with Google.");
-    return;
+// FETCH events from Google Calendar API inside current visible month
+async function fetchGoogleCalendarEvents() {
+  if (!state.googleAccessToken) return [];
+
+  const year = state.calMonth.getFullYear();
+  const month = state.calMonth.getMonth();
+  
+  // Calculate boundaries for visible month API query window
+  const timeMin = new Date(year, month, 1).toISOString();
+  const timeMax = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
+
+  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=true&orderBy=startTime`;
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${state.googleAccessToken}` }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return data.items || [];
+    }
+  } catch (err) {
+    console.error("Failed to fetch Google Calendar entries: ", err);
   }
+  return [];
+}
+
+// PUSH event to Google Calendar API
+async function writeEventToGoogleCalendar(booking) {
+  if (!state.googleAccessToken) return;
 
   const durationObj = SERVICES[booking.serviceId] || { name: booking.serviceName, duration: 45 };
   const startTime = buildISOString(booking.date, booking.time, 0);
@@ -210,9 +237,7 @@ async function writeEventToGoogleCalendar(booking) {
       dateTime: endTime,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
     },
-    attendees: [
-      { email: booking.email }
-    ]
+    attendees: [{ email: booking.email }]
   };
 
   try {
@@ -227,17 +252,14 @@ async function writeEventToGoogleCalendar(booking) {
 
     if (response.ok) {
       console.log("Successfully pushed event to Google Calendar.");
-    } else {
-      const errRes = await response.json();
-      console.error("Google Calendar API error responses:", errRes);
     }
   } catch (err) {
-    console.error("Network failure trying to contact Google Calendar APIs:", err);
+    console.error("Network failure contacting Google Calendar API:", err);
   }
 }
 
 /* ======================================================================
-   CALENDAR GENERATOR & ACTIONS
+   CALENDAR GENERATOR & INTEGRATED RENDERING
    ====================================================================== */
 async function initDashboard() {
   await refreshCalendarView();
@@ -247,11 +269,43 @@ async function initDashboard() {
 function changeMonth(delta) {
   state.calMonth = new Date(state.calMonth.getFullYear(), state.calMonth.getMonth() + delta, 1);
   state.selectedDay = null;
-  renderCalendarGrid();
+  refreshCalendarView();
 }
 
 async function refreshCalendarView() {
+  // 1. Fetch from Firestore
   state.bookingsCache = await DB.listBookings();
+  
+  // 2. Fetch from Google Calendar if logged in
+  if (state.googleAccessToken) {
+    const rawGoogleEvents = await fetchGoogleCalendarEvents();
+    
+    // Normalize and filter Google events to identify non-system entries
+    state.googleEventsCache = rawGoogleEvents.map(evt => {
+      if (!evt.start || !evt.start.dateTime) return null;
+      
+      const startDt = new Date(evt.start.dateTime);
+      const dateStr = startDt.toISOString().slice(0, 10);
+      const timeStr = startDt.toTimeString().slice(0, 5);
+
+      return {
+        id: evt.id,
+        summary: evt.summary || "Busy Slot",
+        date: dateStr,
+        time: timeStr,
+        source: "google",
+        htmlLink: evt.htmlLink
+      };
+    }).filter(evt => {
+      if (!evt) return false;
+      // Filter out events created by our app to prevent duplicate rendering
+      const isSystemEvent = state.bookingsCache.some(b => b.date === evt.date && b.time === evt.time);
+      return !isSystemEvent;
+    });
+  } else {
+    state.googleEventsCache = [];
+  }
+
   renderCalendarGrid();
 }
 
@@ -265,25 +319,37 @@ function renderCalendarGrid() {
   const firstDow = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  const byDate = {};
+  // Map out days for dot indexing
+  const dotsByDate = {};
+  
+  // Append Firestore dots
   state.bookingsCache.forEach(b => {
     if (b.status === 'pending' || b.status === 'approved') {
-      (byDate[b.date] = byDate[b.date] || []).push(b);
+      (dotsByDate[b.date] = dotsByDate[b.date] || []).push(b.status);
     }
+  });
+
+  // Append Google external busy dots
+  state.googleEventsCache.forEach(evt => {
+    (dotsByDate[evt.date] = dotsByDate[evt.date] || []).push("google");
   });
 
   let html = '';
   for (let i = 0; i < firstDow; i++) html += `<div class="cal-day empty"></div>`;
   for (let d = 1; d <= daysInMonth; d++) {
     const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const dayBookings = byDate[iso] || [];
-    const hasPending = dayBookings.some(b => b.status === 'pending');
-    const hasApproved = dayBookings.some(b => b.status === 'approved');
+    const dayDots = dotsByDate[iso] || [];
+    
+    const hasPending = dayDots.includes('pending');
+    const hasApproved = dayDots.includes('approved');
+    const hasGoogle = dayDots.includes('google');
+
     html += `<div class="cal-day" onclick="openDayModal('${iso}')">
       <div class="d-num">${d}</div>
       <div class="cal-dots">
         ${hasPending ? '<span class="cal-dot pending"></span>' : ''}
         ${hasApproved ? '<span class="cal-dot approved"></span>' : ''}
+        ${hasGoogle ? '<span class="cal-dot google" title="Google Busy Block"></span>' : ''}
       </div>
     </div>`;
   }
@@ -311,41 +377,68 @@ function closeDayModal() {
 
 function renderModalBookings() {
   const container = document.getElementById('modalBookingsList');
-  const bookings = state.bookingsCache.filter(b => b.date === state.selectedDay);
+  
+  // Fetch system bookings & external Google bookings for this day
+  const systemBookings = state.bookingsCache.filter(b => b.date === state.selectedDay);
+  const googleBookings = state.googleEventsCache.filter(evt => evt.date === state.selectedDay);
 
-  if (bookings.length === 0) {
+  if (systemBookings.length === 0 && googleBookings.length === 0) {
     container.innerHTML = `<div class="empty-state" style="padding: 40px 10px;">No bookings scheduled for this date.</div>`;
     return;
   }
 
-  container.innerHTML = bookings.map(b => `
-    <div class="booking-row" style="flex-direction:column; align-items:stretch; gap:10px;">
-      <div>
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <b style="font-size:1.02rem;">${esc(b.time)} — ${esc(b.name)}</b>
-          <span class="badge ${b.status}">${b.status}</span>
+  let htmlMarkup = "";
+
+  // 1. Render system bookings (active controls)
+  if (systemBookings.length > 0) {
+    htmlMarkup += systemBookings.map(b => `
+      <div class="booking-row" style="flex-direction:column; align-items:stretch; gap:10px;">
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <b style="font-size:1.02rem;">${esc(b.time)} — ${esc(b.name)}</b>
+            <span class="badge ${b.status}">${b.status}</span>
+          </div>
+          <div class="meta-line">${esc(b.serviceName)} · <a href="mailto:${esc(b.email)}" style="text-decoration:underline;">${esc(b.email)}</a></div>
+          ${b.notes ? `<div class="meta-line" style="font-style:italic; margin-top:6px; color:var(--ink-dim);">"${esc(b.notes)}"</div>` : ''}
         </div>
-        <div class="meta-line">${esc(b.serviceName)} · <a href="mailto:${esc(b.email)}" style="text-decoration:underline;">${esc(b.email)}</a></div>
-        ${b.notes ? `<div class="meta-line" style="font-style:italic; margin-top:6px; color:var(--ink-dim);">"${esc(b.notes)}"</div>` : ''}
+        <div style="display:flex; gap:6px; justify-content:flex-end; border-top:1px solid var(--border); padding-top:10px; margin-top:4px;">
+          ${b.status === 'pending' ? `
+            <button class="btn btn-primary btn-sm" onclick="changeStatus('${b.id}', 'approved')">Approve</button>
+            <button class="btn btn-outline-red btn-sm" onclick="changeStatus('${b.id}', 'declined')">Decline</button>
+          ` : b.status === 'approved' ? `
+            <button class="btn btn-outline-red btn-sm" onclick="changeStatus('${b.id}', 'declined')">Cancel</button>
+          ` : `
+            <button class="btn btn-ghost btn-sm" onclick="changeStatus('${b.id}', 'approved')">Re-approve</button>
+          `}
+        </div>
       </div>
-      <div style="display:flex; gap:6px; justify-content:flex-end; border-top:1px solid var(--border); padding-top:10px; margin-top:4px;">
-        ${b.status === 'pending' ? `
-          <button class="btn btn-primary btn-sm" onclick="changeStatus('${b.id}', 'approved')">Approve</button>
-          <button class="btn btn-outline-red btn-sm" onclick="changeStatus('${b.id}', 'declined')">Decline</button>
-        ` : b.status === 'approved' ? `
-          <button class="btn btn-outline-red btn-sm" onclick="changeStatus('${b.id}', 'declined')">Cancel</button>
-        ` : `
-          <button class="btn btn-ghost btn-sm" onclick="changeStatus('${b.id}', 'approved')">Re-approve</button>
-        `}
+    `).join('');
+  }
+
+  // 2. Render Google Calendar external busy slots (read-only)
+  if (googleBookings.length > 0) {
+    htmlMarkup += googleBookings.map(b => `
+      <div class="booking-row" style="border: 1px dashed var(--border-strong); background: rgba(17,17,17,0.02);">
+        <div class="info" style="width:100%;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <b style="font-size:1.02rem; color: var(--ink-dim);">${esc(b.time)} — ${esc(b.summary)}</b>
+            <span class="badge google">Google Sync</span>
+          </div>
+          <div class="meta-line">External/Personal Booking (Imported)</div>
+          <div class="meta-line" style="margin-top:4px;">
+            <a href="${b.htmlLink}" target="_blank" style="text-decoration:underline; color:var(--ink-dim);">View in Google Calendar ↗</a>
+          </div>
+        </div>
       </div>
-    </div>
-  `).join('');
+    `).join('');
+  }
+
+  container.innerHTML = htmlMarkup;
 }
 
 async function changeStatus(id, newStatus) {
   await DB.updateBooking(id, { status: newStatus });
   
-  // If we just approved the booking, try to sync it to Google Calendar
   if (newStatus === "approved") {
     const bookingObj = state.bookingsCache.find(b => b.id === id);
     if (bookingObj) {
@@ -392,7 +485,6 @@ async function submitManualBooking() {
     document.getElementById('manualEmail').value = '';
     document.getElementById('manualNotes').value = '';
 
-    // If added as approved, automatically try to push to Google Calendar
     if (status === "approved") {
       await writeEventToGoogleCalendar(newBooking);
     }
